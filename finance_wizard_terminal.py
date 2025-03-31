@@ -57,8 +57,72 @@ def plot_chart(ticker):
 tab1, tab2, tab3, tab4 = st.tabs(["🧠 Options", "📈 Swing", "📓 Journal", "🔁 Backtest"])
 
 with tab1:
-    st.subheader("Options Spread Scanner (Demo Placeholder)")
-    st.info("Coming soon: Your options scanner with ROI filters and AI overlay.")
+    st.subheader("🧠 Options Spread Scanner")
+
+    # --- Filter Settings ---
+    roi_min, roi_max = st.slider("ROI % Range", 0, 200, (60, 90), step=5)
+    dte_min, dte_max = st.slider("Days to Expiration (DTE)", 5, 60, (30, 45), step=1)
+    scan_button = st.button("🔍 Run Options Spread Scan")
+
+    tickers = ["AAPL", "AMD", "NVDA", "MSFT", "SPY", "TSLA"]
+    results = []
+
+    if scan_button or st.session_state.get("autoscan", False):
+        with st.spinner("Scanning options spreads..."):
+            for ticker in tickers:
+                try:
+                    opt = yf.Ticker(ticker).option_chain
+                    dates = yf.Ticker(ticker).options
+                    for exp in dates:
+                        exp_date = datetime.strptime(exp, "%Y-%m-%d")
+                        days_to_exp = (exp_date - datetime.today()).days
+                        if not (dte_min <= days_to_exp <= dte_max):
+                            continue
+
+                        calls = yf.Ticker(ticker).option_chain(exp).calls
+                        puts = yf.Ticker(ticker).option_chain(exp).puts
+
+                        # Simple logic: find out-of-the-money call/put spreads
+                        for df, opt_type in [(calls, \"Call\"), (puts, \"Put\")]:
+                            df = df[df['inTheMoney'] == False]
+                            for i in range(len(df)-1):
+                                leg1 = df.iloc[i]
+                                leg2 = df.iloc[i+1]
+                                if leg1['strike'] < leg2['strike'] and opt_type == \"Call\":
+                                    credit = round(leg1['bid'] - leg2['ask'], 2)
+                                elif leg1['strike'] > leg2['strike'] and opt_type == \"Put\":
+                                    credit = round(leg2['bid'] - leg1['ask'], 2)
+                                else:
+                                    continue
+
+                                width = abs(leg1['strike'] - leg2['strike'])
+                                if width == 0:
+                                    continue
+
+                                roi = round((credit / width) * 100, 2)
+                                if roi_min <= roi <= roi_max:
+                                    results.append({
+                                        \"Ticker\": ticker,
+                                        \"Type\": opt_type,
+                                        \"Exp\": exp,
+                                        \"Strike 1\": leg1['strike'],
+                                        \"Strike 2\": leg2['strike'],
+                                        \"Credit\": credit,
+                                        \"Width\": width,
+                                        \"ROI %\": roi,
+                                        \"DTE\": days_to_exp
+                                    })
+                except Exception as e:
+                    st.warning(f\"Error scanning {ticker}: {e}\")
+
+    if results:
+        df = pd.DataFrame(results)
+        st.success(f\"Found {len(df)} spreads meeting your criteria!\")
+        st.dataframe(df)
+        st.download_button(\"📥 Download Spreads\", df.to_csv(index=False), file_name=\"spread_scanner.csv\")
+    else:
+        st.info(\"Run a scan to view spread results.\")
+
 
 with tab2:
     st.subheader("Swing Trade Screener")
