@@ -56,23 +56,39 @@ def plot_chart(ticker):
 # === Tabs ===
 tab1, tab2, tab3, tab4 = st.tabs(["🧠 Options", "📈 Swing", "📓 Journal", "🔁 Backtest"])
 
+import requests
+import io
+
+@st.cache_data
+def get_all_tickers():
+    try:
+        url = "https://old.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
+        content = requests.get(url).content
+        df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep='|')
+        tickers = df['Symbol'].tolist()
+        tickers = [t for t in tickers if t.isalpha() and len(t) <= 5]
+        return tickers
+    except Exception as e:
+        st.error(f"Failed to fetch tickers: {e}")
+        return ["AAPL", "MSFT", "TSLA"]
+
 with tab1:
     st.subheader("🧠 Options Spread Scanner")
 
-    # --- Filter Settings ---
     roi_min, roi_max = st.slider("ROI % Range", 0, 200, (60, 90), step=5)
     dte_min, dte_max = st.slider("Days to Expiration (DTE)", 5, 60, (30, 45), step=1)
     scan_button = st.button("🔍 Run Options Spread Scan")
 
-    tickers = ["AAPL", "AMD", "NVDA", "MSFT", "SPY", "TSLA"]
+    tickers = get_all_tickers()
     results = []
 
     if scan_button or st.session_state.get("autoscan", False):
-        with st.spinner("Scanning options spreads..."):
+        with st.spinner("Scanning options spreads... (This may take a minute)"):
             for ticker in tickers:
                 try:
-                    opt = yf.Ticker(ticker).option_chain
                     dates = yf.Ticker(ticker).options
+                    if not dates:
+                        continue
                     for exp in dates:
                         exp_date = datetime.strptime(exp, "%Y-%m-%d")
                         days_to_exp = (exp_date - datetime.today()).days
@@ -82,15 +98,14 @@ with tab1:
                         calls = yf.Ticker(ticker).option_chain(exp).calls
                         puts = yf.Ticker(ticker).option_chain(exp).puts
 
-                        # Simple logic: find out-of-the-money call/put spreads
-                        for df, opt_type in [(calls, \"Call\"), (puts, \"Put\")]:
+                        for df, opt_type in [(calls, "Call"), (puts, "Put")]:
                             df = df[df['inTheMoney'] == False]
                             for i in range(len(df)-1):
                                 leg1 = df.iloc[i]
                                 leg2 = df.iloc[i+1]
-                                if leg1['strike'] < leg2['strike'] and opt_type == \"Call\":
+                                if opt_type == "Call" and leg1['strike'] < leg2['strike']:
                                     credit = round(leg1['bid'] - leg2['ask'], 2)
-                                elif leg1['strike'] > leg2['strike'] and opt_type == \"Put\":
+                                elif opt_type == "Put" and leg1['strike'] > leg2['strike']:
                                     credit = round(leg2['bid'] - leg1['ask'], 2)
                                 else:
                                     continue
@@ -102,26 +117,26 @@ with tab1:
                                 roi = round((credit / width) * 100, 2)
                                 if roi_min <= roi <= roi_max:
                                     results.append({
-                                        \"Ticker\": ticker,
-                                        \"Type\": opt_type,
-                                        \"Exp\": exp,
-                                        \"Strike 1\": leg1['strike'],
-                                        \"Strike 2\": leg2['strike'],
-                                        \"Credit\": credit,
-                                        \"Width\": width,
-                                        \"ROI %\": roi,
-                                        \"DTE\": days_to_exp
+                                        "Ticker": ticker,
+                                        "Type": opt_type,
+                                        "Exp": exp,
+                                        "Strike 1": leg1['strike'],
+                                        "Strike 2": leg2['strike'],
+                                        "Credit": credit,
+                                        "Width": width,
+                                        "ROI %": roi,
+                                        "DTE": days_to_exp
                                     })
                 except Exception as e:
-                    st.warning(f\"Error scanning {ticker}: {e}\")
+                    st.warning(f"Error scanning {ticker}: {e}")
 
     if results:
         df = pd.DataFrame(results)
-        st.success(f\"Found {len(df)} spreads meeting your criteria!\")
+        st.success(f"Found {len(df)} spreads meeting your criteria!")
         st.dataframe(df)
-        st.download_button(\"📥 Download Spreads\", df.to_csv(index=False), file_name=\"spread_scanner.csv\")
+        st.download_button("📥 Download Spreads", df.to_csv(index=False), file_name="spread_scanner.csv")
     else:
-        st.info(\"Run a scan to view spread results.\")
+        st.info("Run a scan to view spread results.")
 
 
 with tab2:
