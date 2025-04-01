@@ -3,14 +3,13 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import xgboost as xgb
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
+from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objs as go
 from datetime import datetime
 import requests
 
 st.set_page_config(page_title="Finance Wizard Swing Terminal", layout="wide")
-st.title("📈 Finance Wizard Swing Trade Terminal")
+st.title("📈 Finance Wizard Swing Trade Terminal (Optimized)")
 
 @st.cache_data
 def get_all_us_tickers():
@@ -19,7 +18,10 @@ def get_all_us_tickers():
     tickers = df['Symbol'].tolist()
     return tickers
 
-# === Helper Functions ===
+@st.cache_data
+def get_price_data(ticker):
+    return yf.Ticker(ticker).history(period="6mo")
+
 def compute_rsi(series, period=14):
     delta = series.diff()
     gain = delta.where(delta > 0, 0)
@@ -38,110 +40,88 @@ def calculate_indicators(df):
     df['Momentum'] = df['Close'].diff()
     return df
 
-def train_model(data):
-    data = data.dropna()
-    data['Target'] = (data['Close'].shift(-3) > data['Close']).astype(int)
-    features = ['RSI', 'MACD', 'Signal', 'Momentum']
-    X = data[features]
-    y = data['Target']
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+@st.cache_resource
+def train_global_model():
+    ticker_list = ['AAPL', 'MSFT', 'NVDA', 'AMD', 'TSLA']
+    frames = []
+    for ticker in ticker_list:
+        df = get_price_data(ticker)
+        df = calculate_indicators(df)
+        df['Target'] = (df['Close'].shift(-3) > df['Close']).astype(int)
+        frames.append(df[['RSI', 'MACD', 'Signal', 'Momentum', 'Target']])
+    full_data = pd.concat(frames).dropna()
+    X = full_data[['RSI', 'MACD', 'Signal', 'Momentum']]
+    y = full_data['Target']
     model = xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss')
-    model.fit(X_train, y_train)
+    model.fit(X, y)
     return model
 
-def plot_chart(ticker):
-    df = yf.Ticker(ticker).history(period="3mo")
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close'],
-        name='Candlestick'))
-    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].ewm(span=20).mean(), mode='lines', name='EMA20'))
-    fig.update_layout(title=f'{ticker} Chart', xaxis_title='Date', yaxis_title='Price', height=400)
-    return fig
+def scan_ticker(ticker, model, filters):
+    try:
+        df = get_price_data(ticker)
+        if df.empty or len(df) < 30:
+            return None
+        df = calculate_indicators(df)
+        latest = df.iloc[-1]
+        features = pd.DataFrame([[latest['RSI'], latest['MACD'], latest['Signal'], latest['Momentum']]],
+                                columns=['RSI', 'MACD', 'Signal', 'Momentum'])
+        pred = model.predict(features)[0]
+        prob = round(model.predict_proba(features)[0][1] * 100, 2)
 
-# === Tabs ===
+        price = latest['Close']
+        ema = latest['EMA20']
+        rsi = latest['RSI']
+        macd = latest['MACD']
+        signal = latest['Signal']
+        volume = latest['Volume']
+        near_ema = abs(price - ema) / ema * 100 <= filters['ema_tolerance']
+
+        if price < 5 or price > 200 or volume < filters['volume_min']:
+            return None
+
+        if filters['rsi_min'] <= rsi <= filters['rsi_max'] and (not filters['macd_filter'] or macd > signal) and near_ema and prob >= filters['confidence_min']:
+            status = "Swing ✅" if pred == 1 else "Approaching 🔄"
+            return {"Ticker": ticker, "Price": round(price, 2), "RSI": round(rsi, 1), "AI Confidence %": prob, "Status": status}
+    except:
+        return None
+
+# === UI ===
 tab1, tab2 = st.tabs(["📈 Swing", "📓 Journal"])
 
 with tab1:
-    st.subheader("Swing Trade Screener with Smart AI Forecast")
+    st.subheader("Optimized AI Swing Screener")
 
-    default_rsi = (40, 60)
-    default_ema_tolerance = 3
-    default_confidence = 60
-    default_macd_filter = True
-    default_volume_min = 1000000
+    rsi_min = st.slider("RSI Min", 10, 90, 40)
+    rsi_max = st.slider("RSI Max", 10, 90, 60)
+    macd_filter = st.checkbox("Require MACD > Signal", value=True)
+    ema_tolerance = st.slider("Max Distance from EMA20 (%)", 0, 10, 3)
+    volume_min = st.number_input("Min Volume", 100000, 10000000, 1000000, step=100000)
+    confidence_min = st.slider("Minimum AI Confidence %", 50, 100, 60)
+    run_scan = st.button("🔍 Run Optimized Scan")
 
-    if 'reset' not in st.session_state:
-        st.session_state.reset = False
-
-    if st.button("Reset to Defaults"):
-        st.session_state.rsi_min = default_rsi[0]
-        st.session_state.rsi_max = default_rsi[1]
-        st.session_state.ema_tolerance = default_ema_tolerance
-        st.session_state.confidence_min = default_confidence
-        st.session_state.macd_filter = default_macd_filter
-        st.session_state.volume_min = default_volume_min
-        st.session_state.reset = True
-
-    rsi_min = st.slider("RSI Min", 10, 90, st.session_state.get('rsi_min', default_rsi[0]), key='rsi_min')
-    rsi_max = st.slider("RSI Max", 10, 90, st.session_state.get('rsi_max', default_rsi[1]), key='rsi_max')
-    macd_filter = st.checkbox("Require MACD > Signal", value=st.session_state.get('macd_filter', default_macd_filter), key='macd_filter')
-    ema_tolerance = st.slider("Max Distance from EMA20 (%)", 0, 10, st.session_state.get('ema_tolerance', default_ema_tolerance), key='ema_tolerance')
-    volume_min = st.number_input("Min Volume", 100000, 10000000, st.session_state.get('volume_min', default_volume_min), step=100000, key='volume_min')
-    confidence_min = st.slider("Minimum AI Confidence %", 50, 100, st.session_state.get('confidence_min', default_confidence), key='confidence_min')
-
-    run_scan = st.button("🔍 Run Scan")
     if run_scan:
         tickers = get_all_us_tickers()
-        confirmed, approaching = [], []
+        filters = {
+            'rsi_min': rsi_min,
+            'rsi_max': rsi_max,
+            'macd_filter': macd_filter,
+            'ema_tolerance': ema_tolerance,
+            'volume_min': volume_min,
+            'confidence_min': confidence_min
+        }
+        model = train_global_model()
 
-        for ticker in tickers:
-            try:
-                df = yf.Ticker(ticker).history(period="6mo")
-                if df.empty or len(df) < 30:
-                    continue
-                df = calculate_indicators(df)
-                model = train_model(df)
+        st.info("Scanning tickers with multithreading...")
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            results = list(executor.map(lambda t: scan_ticker(t, model, filters), tickers))
 
-                latest = df.iloc[-1]
-                features = pd.DataFrame([[latest['RSI'], latest['MACD'], latest['Signal'], latest['Momentum']]],
-                                        columns=['RSI', 'MACD', 'Signal', 'Momentum'])
-                pred = model.predict(features)[0]
-                prob = round(model.predict_proba(features)[0][1] * 100, 2)
-
-                price = latest['Close']
-                ema = latest['EMA20']
-                rsi = latest['RSI']
-                macd = latest['MACD']
-                signal = latest['Signal']
-                volume = latest['Volume']
-                near_ema = abs(price - ema) / ema * 100 <= ema_tolerance
-
-                if price < 5 or price > 200 or volume < volume_min:
-                    continue
-
-                if rsi_min <= rsi <= rsi_max and (not macd_filter or macd > signal) and near_ema and prob >= confidence_min:
-                    if pred == 1:
-                        confirmed.append({"Ticker": ticker, "Price": round(price, 2), "RSI": round(rsi, 1), "AI Confidence %": prob, "Status": "Swing ✅"})
-                    else:
-                        approaching.append({"Ticker": ticker, "Price": round(price, 2), "RSI": round(rsi, 1), "AI Confidence %": prob, "Status": "Approaching 🔄"})
-            except:
-                continue
-
-        if confirmed:
-            st.success("✅ Confirmed Swing Setups")
-            st.dataframe(pd.DataFrame(confirmed))
-
-        if approaching:
-            st.info("🔮 AI Forecasted Approaching Setups")
-            st.dataframe(pd.DataFrame(approaching))
-
-        if not confirmed and not approaching:
-            st.warning("No setups found with current filters.")
+        results = [res for res in results if res is not None]
+        df = pd.DataFrame(results)
+        if not df.empty:
+            st.success(f"Found {len(df)} setups")
+            st.dataframe(df)
+        else:
+            st.warning("No setups found.")
 
 with tab2:
     st.subheader("Trade Journal")
