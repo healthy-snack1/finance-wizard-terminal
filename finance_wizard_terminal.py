@@ -72,15 +72,27 @@ with tab1:
     default_rsi = (40, 60)
     default_ema_tolerance = 3
     default_confidence = 60
-    rsi_min, rsi_max = st.slider("RSI Range", 10, 90, default_rsi)
-    macd_filter = st.checkbox("Require MACD > Signal", value=True)
-    ema_tolerance = st.slider("Max Distance from EMA20 (%)", 0, 10, default_ema_tolerance)
-    volume_min = st.number_input("Min Volume", 100000, 10000000, 1000000, step=100000)
-    confidence_min = st.slider("Minimum AI Confidence %", 50, 100, default_confidence)
+    default_macd_filter = True
+    default_volume_min = 1000000
+
+    if 'reset' not in st.session_state:
+        st.session_state.reset = False
+
     if st.button("Reset to Defaults"):
-        rsi_min, rsi_max = default_rsi
-        ema_tolerance = default_ema_tolerance
-        confidence_min = default_confidence
+        st.session_state.rsi_min = default_rsi[0]
+        st.session_state.rsi_max = default_rsi[1]
+        st.session_state.ema_tolerance = default_ema_tolerance
+        st.session_state.confidence_min = default_confidence
+        st.session_state.macd_filter = default_macd_filter
+        st.session_state.volume_min = default_volume_min
+        st.session_state.reset = True
+
+    rsi_min = st.slider("RSI Min", 10, 90, st.session_state.get('rsi_min', default_rsi[0]), key='rsi_min')
+    rsi_max = st.slider("RSI Max", 10, 90, st.session_state.get('rsi_max', default_rsi[1]), key='rsi_max')
+    macd_filter = st.checkbox("Require MACD > Signal", value=st.session_state.get('macd_filter', default_macd_filter), key='macd_filter')
+    ema_tolerance = st.slider("Max Distance from EMA20 (%)", 0, 10, st.session_state.get('ema_tolerance', default_ema_tolerance), key='ema_tolerance')
+    volume_min = st.number_input("Min Volume", 100000, 10000000, st.session_state.get('volume_min', default_volume_min), step=100000, key='volume_min')
+    confidence_min = st.slider("Minimum AI Confidence %", 50, 100, st.session_state.get('confidence_min', default_confidence), key='confidence_min')
 
     run_scan = st.button("🔍 Run Scan")
     if run_scan:
