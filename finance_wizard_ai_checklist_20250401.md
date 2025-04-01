@@ -10,3 +10,10 @@
 - [ ] List top 5 most accurate tickers based on prediction history
 - [ ] Heatmap/time-series of model accuracy over time
 - [ ] Expandable row charts in result tables with inline technicals
+- [ ] 📊 Add visual analytics from trade journal (win rate, equity curve, avg hold time)
+- [ ] 📅 Add calendar-style view of entry and exit dates
+- [ ] 🧮 Auto-estimate risk/reward before logging a trade based on ATR or recent price range
+
+- [ ] ⚙️ Add async-based data fetching (aiohttp) to download multiple price histories in parallel
+- [ ] 💡 Preload a filtered universe of high-liquidity, high-volume stocks to reduce noise
+- [ ] 🧮 Use GPU acceleration for XGBoost inference (if available on cloud deployment)
