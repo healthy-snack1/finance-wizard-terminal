@@ -60,7 +60,7 @@ def plot_chart(ticker):
 
 @st.cache_data
 def get_all_us_tickers():
-    url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents_symbols.txt"
+    url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
     df = pd.read_csv(url)
     tickers = df['Symbol'].tolist()
     return tickers
