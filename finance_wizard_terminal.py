@@ -5,11 +5,13 @@ import yfinance as yf
 import xgboost as xgb
 from concurrent.futures import ThreadPoolExecutor
 import plotly.graph_objs as go
-from datetime import datetime
+from datetime import datetime, timedelta
+import os
+import csv
 import requests
 
 st.set_page_config(page_title="Finance Wizard Swing Terminal", layout="wide")
-st.title("📈 Finance Wizard Swing Trade Terminal (Optimized)")
+st.title("📈 Finance Wizard Swing Trade Terminal (Optimized + Learning)")
 
 @st.cache_data
 def get_all_us_tickers():
@@ -56,6 +58,26 @@ def train_global_model():
     model.fit(X, y)
     return model
 
+def is_duplicate_log(ticker, date, price):
+    if not os.path.exists("ai_scoreboard.csv"):
+        return False
+    with open("ai_scoreboard.csv", "r") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row['Ticker'] == ticker and row['Date'] == date and abs(float(row['Price at Scan']) - price) < 0.01:
+                return True
+    return False
+
+def log_prediction(ticker, prediction, confidence, price):
+    date = datetime.now().strftime("%Y-%m-%d")
+    if is_duplicate_log(ticker, date, price):
+        return
+    with open("ai_scoreboard.csv", "a", newline='') as file:
+        writer = csv.writer(file)
+        if file.tell() == 0:
+            writer.writerow(["Date", "Ticker", "Prediction", "Confidence", "Price at Scan"])
+        writer.writerow([date, ticker, prediction, confidence, round(price, 2)])
+
 def scan_ticker(ticker, model, filters):
     try:
         df = get_price_data(ticker)
@@ -80,17 +102,18 @@ def scan_ticker(ticker, model, filters):
             return None
 
         if filters['rsi_min'] <= rsi <= filters['rsi_max'] and (not filters['macd_filter'] or macd > signal) and near_ema and prob >= filters['confidence_min']:
+            prediction = "Up" if pred == 1 else "Down"
+            log_prediction(ticker, prediction, prob, price)
             status = "Swing ✅" if pred == 1 else "Approaching 🔄"
             return {"Ticker": ticker, "Price": round(price, 2), "RSI": round(rsi, 1), "AI Confidence %": prob, "Status": status}
     except:
         return None
 
 # === UI ===
-tab1, tab2 = st.tabs(["📈 Swing", "📓 Journal"])
+tab1, tab2, tab3 = st.tabs(["📈 Swing", "📓 Journal", "🧠 AI Scoreboard"])
 
 with tab1:
     st.subheader("Optimized AI Swing Screener")
-
     rsi_min = st.slider("RSI Min", 10, 90, 40)
     rsi_max = st.slider("RSI Max", 10, 90, 60)
     macd_filter = st.checkbox("Require MACD > Signal", value=True)
@@ -152,3 +175,26 @@ with tab2:
             st.success(f"Trade for {ticker} added.")
     st.dataframe(journal_df)
     st.download_button("Download Journal", journal_df.to_csv(index=False), file_name="trade_log.csv")
+
+with tab3:
+    st.subheader("🧠 AI Scoreboard")
+    if os.path.exists("ai_scoreboard.csv"):
+        scoreboard_df = pd.read_csv("ai_scoreboard.csv")
+        st.dataframe(scoreboard_df)
+        st.download_button("Download AI Log", scoreboard_df.to_csv(index=False), file_name="ai_scoreboard.csv")
+        total = len(scoreboard_df)
+        correct = 0
+        for _, row in scoreboard_df.iterrows():
+            try:
+                history = yf.Ticker(row['Ticker']).history(start=row['Date'], end=(pd.to_datetime(row['Date']) + timedelta(days=5)).strftime('%Y-%m-%d'))
+                initial_price = float(row['Price at Scan'])
+                future_max = history['Close'].max()
+                if row['Prediction'] == "Up" and (future_max - initial_price) / initial_price > 0.03:
+                    correct += 1
+            except:
+                continue
+        if total > 0:
+            winrate = round((correct / total) * 100, 2)
+            st.metric("Model Accuracy (3-day +3%)", f"{winrate}%")
+    else:
+        st.info("No predictions logged yet. Run a scan to begin tracking.")
