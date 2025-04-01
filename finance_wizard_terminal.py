@@ -58,6 +58,19 @@ def train_global_model():
     model.fit(X, y)
     return model
 
+def log_ai_prediction(ticker, prediction, confidence, price):
+    date = datetime.now().strftime("%Y-%m-%d")
+    file = "ai_scoreboard.csv"
+    if os.path.exists(file):
+        df = pd.read_csv(file)
+        if ((df['Ticker'] == ticker) & (df['Date'] == date) & (abs(df['Price at Scan'] - price) < 0.01)).any():
+            return
+    with open(file, "a", newline='') as f:
+        writer = csv.writer(f)
+        if os.stat(file).st_size == 0:
+            writer.writerow(["Date", "Ticker", "Prediction", "Confidence", "Price at Scan"])
+        writer.writerow([date, ticker, prediction, confidence, round(price, 2)])
+
 def scan_ticker(ticker, model, filters):
     try:
         df = get_price_data(ticker)
@@ -83,12 +96,13 @@ def scan_ticker(ticker, model, filters):
 
         if filters['rsi_min'] <= rsi <= filters['rsi_max'] and (not filters['macd_filter'] or macd > signal) and near_ema and prob >= filters['confidence_min']:
             prediction = "Up" if pred == 1 else "Down"
+            log_ai_prediction(ticker, prediction, prob, price)
             return {"Ticker": ticker, "Price": round(price, 2), "RSI": round(rsi, 1), "Confidence": prob, "Prediction": prediction}
     except:
         return None
 
 # === UI ===
-tab1, tab2 = st.tabs(["📈 Swing Scanner", "📓 Trade Journal"])
+tab1, tab2, tab3 = st.tabs(["📈 Swing Scanner", "📓 Trade Journal", "🧠 AI Scoreboard"])
 
 with tab1:
     st.subheader("AI-Powered Swing Trade Screener")
@@ -160,3 +174,26 @@ with tab2:
         st.download_button("📥 Download Journal", journal_df.to_csv(index=False), file_name="trade_log.csv")
     else:
         st.info("No trades logged yet.")
+
+with tab3:
+    st.subheader("🧠 AI Scoreboard")
+    if os.path.exists("ai_scoreboard.csv"):
+        scoreboard_df = pd.read_csv("ai_scoreboard.csv")
+        st.dataframe(scoreboard_df)
+        st.download_button("⬇️ Download AI Log", scoreboard_df.to_csv(index=False), file_name="ai_scoreboard.csv")
+        total = len(scoreboard_df)
+        correct = 0
+        for _, row in scoreboard_df.iterrows():
+            try:
+                history = yf.Ticker(row['Ticker']).history(start=row['Date'], end=(pd.to_datetime(row['Date']) + timedelta(days=5)).strftime('%Y-%m-%d'))
+                initial_price = float(row['Price at Scan'])
+                future_max = history['Close'].max()
+                if row['Prediction'] == "Up" and (future_max - initial_price) / initial_price > 0.03:
+                    correct += 1
+            except:
+                continue
+        if total > 0:
+            winrate = round((correct / total) * 100, 2)
+            st.metric("3-Day Win Rate (target +3%)", f"{winrate}%")
+    else:
+        st.info("No AI predictions logged yet. Run a scan to begin tracking.")
