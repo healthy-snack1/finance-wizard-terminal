@@ -58,13 +58,13 @@ def plot_chart(ticker):
     fig.update_layout(title=f'{ticker} Chart', xaxis_title='Date', yaxis_title='Price', height=400)
     return fig
 
+@st.cache_data
 def get_all_us_tickers():
-    url = "https://old.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
-    content = requests.get(url).content
-    df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep='|')
+    url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents_symbols.txt"
+    df = pd.read_csv(url)
     tickers = df['Symbol'].tolist()
-    tickers = [t for t in tickers if t.isalpha() and len(t) <= 5]
     return tickers
+
 
 # === Tabs ===
 tab1, tab2 = st.tabs(["📈 Swing", "📓 Journal"])
