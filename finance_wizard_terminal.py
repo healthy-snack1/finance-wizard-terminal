@@ -11,7 +11,7 @@ import csv
 import requests
 
 st.set_page_config(page_title="Finance Wizard Swing Terminal", layout="wide")
-st.title("📈 Finance Wizard Swing Trade Terminal (Optimized + Learning)")
+st.title("📈 Finance Wizard Swing Trade Terminal (Smart Journal Mode)")
 
 @st.cache_data
 def get_all_us_tickers():
@@ -58,26 +58,6 @@ def train_global_model():
     model.fit(X, y)
     return model
 
-def is_duplicate_log(ticker, date, price):
-    if not os.path.exists("ai_scoreboard.csv"):
-        return False
-    with open("ai_scoreboard.csv", "r") as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            if row['Ticker'] == ticker and row['Date'] == date and abs(float(row['Price at Scan']) - price) < 0.01:
-                return True
-    return False
-
-def log_prediction(ticker, prediction, confidence, price):
-    date = datetime.now().strftime("%Y-%m-%d")
-    if is_duplicate_log(ticker, date, price):
-        return
-    with open("ai_scoreboard.csv", "a", newline='') as file:
-        writer = csv.writer(file)
-        if file.tell() == 0:
-            writer.writerow(["Date", "Ticker", "Prediction", "Confidence", "Price at Scan"])
-        writer.writerow([date, ticker, prediction, confidence, round(price, 2)])
-
 def scan_ticker(ticker, model, filters):
     try:
         df = get_price_data(ticker)
@@ -103,24 +83,22 @@ def scan_ticker(ticker, model, filters):
 
         if filters['rsi_min'] <= rsi <= filters['rsi_max'] and (not filters['macd_filter'] or macd > signal) and near_ema and prob >= filters['confidence_min']:
             prediction = "Up" if pred == 1 else "Down"
-            log_prediction(ticker, prediction, prob, price)
-            status = "Swing ✅" if pred == 1 else "Approaching 🔄"
-            return {"Ticker": ticker, "Price": round(price, 2), "RSI": round(rsi, 1), "AI Confidence %": prob, "Status": status}
+            return {"Ticker": ticker, "Price": round(price, 2), "RSI": round(rsi, 1), "Confidence": prob, "Prediction": prediction}
     except:
         return None
 
 # === UI ===
-tab1, tab2, tab3 = st.tabs(["📈 Swing", "📓 Journal", "🧠 AI Scoreboard"])
+tab1, tab2 = st.tabs(["📈 Swing Scanner", "📓 Trade Journal"])
 
 with tab1:
-    st.subheader("Optimized AI Swing Screener")
+    st.subheader("AI-Powered Swing Trade Screener")
     rsi_min = st.slider("RSI Min", 10, 90, 40)
     rsi_max = st.slider("RSI Max", 10, 90, 60)
     macd_filter = st.checkbox("Require MACD > Signal", value=True)
     ema_tolerance = st.slider("Max Distance from EMA20 (%)", 0, 10, 3)
     volume_min = st.number_input("Min Volume", 100000, 10000000, 1000000, step=100000)
     confidence_min = st.slider("Minimum AI Confidence %", 50, 100, 60)
-    run_scan = st.button("🔍 Run Optimized Scan")
+    run_scan = st.button("🔍 Run Scan")
 
     if run_scan:
         tickers = get_all_us_tickers()
@@ -134,67 +112,51 @@ with tab1:
         }
         model = train_global_model()
 
-        st.info("Scanning tickers with multithreading...")
         with ThreadPoolExecutor(max_workers=10) as executor:
             results = list(executor.map(lambda t: scan_ticker(t, model, filters), tickers))
 
         results = [res for res in results if res is not None]
         df = pd.DataFrame(results)
+
         if not df.empty:
             st.success(f"Found {len(df)} setups")
             st.dataframe(df)
+            with st.expander("📥 Log a Trade From This Scan"):
+                trade_ticker = st.selectbox("Select Ticker", df['Ticker'].tolist())
+                entry_date = st.date_input("Entry Date", value=datetime.today())
+                entry_price = st.number_input("Entry Price", min_value=0.01)
+                shares = st.number_input("Number of Shares", min_value=1, value=10)
+                exit_price = st.number_input("Exit Price (when available)", min_value=0.0, value=0.0)
+                exit_date = st.date_input("Exit Date", value=datetime.today())
+                notes = st.text_area("Notes")
+                add_trade = st.button("➕ Add Trade to Journal")
+                if add_trade and trade_ticker and entry_price:
+                    profit_amt = (exit_price - entry_price) * shares if exit_price > 0 else 0
+                    profit_pct = ((exit_price - entry_price) / entry_price) * 100 if exit_price > 0 else 0
+                    hold_days = (exit_date - entry_date).days if exit_price > 0 else 0
+                    status = "Closed" if exit_price > 0 else "Open"
+                    row = pd.DataFrame([[trade_ticker, entry_date, entry_price, shares, exit_date, exit_price, round(profit_amt, 2), round(profit_pct, 2), hold_days, status, notes]],
+                                       columns=["Ticker", "Entry Date", "Entry Price", "Shares", "Exit Date", "Exit Price", "Profit $", "Profit %", "Hold Days", "Status", "Notes"])
+                    journal_file = "trade_log.csv"
+                    if os.path.exists(journal_file):
+                        old = pd.read_csv(journal_file)
+                        updated = pd.concat([old, row], ignore_index=True)
+                    else:
+                        updated = row
+                    updated.to_csv(journal_file, index=False)
+                    st.success(f"Trade for {trade_ticker} added to journal.")
         else:
             st.warning("No setups found.")
 
 with tab2:
-    st.subheader("Trade Journal")
+    st.subheader("📓 Trade Journal with Analytics")
     journal_file = "trade_log.csv"
-    try:
+    if os.path.exists(journal_file):
         journal_df = pd.read_csv(journal_file)
-    except:
-        journal_df = pd.DataFrame(columns=["Ticker", "Entry Date", "Entry Price", "Exit Date", "Exit Price", "Return %", "Days Held", "Notes"])
-    with st.form("trade_entry_form"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            ticker = st.text_input("Ticker").upper()
-            entry_price = st.number_input("Entry Price", min_value=0.01)
-            entry_date = st.date_input("Entry Date", value=datetime.today())
-        with col2:
-            exit_price = st.number_input("Exit Price", min_value=0.01)
-            exit_date = st.date_input("Exit Date", value=datetime.today())
-        with col3:
-            notes = st.text_area("Notes")
-        submitted = st.form_submit_button("Add Trade")
-        if submitted and ticker and entry_price and exit_price:
-            return_pct = round(((exit_price - entry_price) / entry_price) * 100, 2)
-            days_held = (exit_date - entry_date).days
-            new_row = pd.DataFrame([[ticker, entry_date, entry_price, exit_date, exit_price, return_pct, days_held, notes]],
-                                   columns=journal_df.columns)
-            journal_df = pd.concat([journal_df, new_row], ignore_index=True)
-            journal_df.to_csv(journal_file, index=False)
-            st.success(f"Trade for {ticker} added.")
-    st.dataframe(journal_df)
-    st.download_button("Download Journal", journal_df.to_csv(index=False), file_name="trade_log.csv")
-
-with tab3:
-    st.subheader("🧠 AI Scoreboard")
-    if os.path.exists("ai_scoreboard.csv"):
-        scoreboard_df = pd.read_csv("ai_scoreboard.csv")
-        st.dataframe(scoreboard_df)
-        st.download_button("Download AI Log", scoreboard_df.to_csv(index=False), file_name="ai_scoreboard.csv")
-        total = len(scoreboard_df)
-        correct = 0
-        for _, row in scoreboard_df.iterrows():
-            try:
-                history = yf.Ticker(row['Ticker']).history(start=row['Date'], end=(pd.to_datetime(row['Date']) + timedelta(days=5)).strftime('%Y-%m-%d'))
-                initial_price = float(row['Price at Scan'])
-                future_max = history['Close'].max()
-                if row['Prediction'] == "Up" and (future_max - initial_price) / initial_price > 0.03:
-                    correct += 1
-            except:
-                continue
-        if total > 0:
-            winrate = round((correct / total) * 100, 2)
-            st.metric("Model Accuracy (3-day +3%)", f"{winrate}%")
+        filter_status = st.selectbox("Filter by Trade Status", ["All", "Open", "Closed"])
+        if filter_status != "All":
+            journal_df = journal_df[journal_df['Status'] == filter_status]
+        st.dataframe(journal_df)
+        st.download_button("📥 Download Journal", journal_df.to_csv(index=False), file_name="trade_log.csv")
     else:
-        st.info("No predictions logged yet. Run a scan to begin tracking.")
+        st.info("No trades logged yet.")
