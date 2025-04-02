@@ -179,11 +179,14 @@ with tab3:
     st.subheader("🧠 AI Scoreboard")
     if os.path.exists("ai_scoreboard.csv"):
         scoreboard_df = pd.read_csv("ai_scoreboard.csv")
-        st.dataframe(scoreboard_df)
-        st.download_button("⬇️ Download AI Log", scoreboard_df.to_csv(index=False), file_name="ai_scoreboard.csv")
-        total = len(scoreboard_df)
+        min_conf, max_conf = st.slider("Filter by Confidence Range (%)", 50, 100, (60, 100))
+        filtered_df = scoreboard_df[(scoreboard_df['Confidence'] >= min_conf) & (scoreboard_df['Confidence'] <= max_conf)]
+        st.dataframe(filtered_df)
+        st.download_button("⬇️ Download Filtered AI Log", filtered_df.to_csv(index=False), file_name="ai_scoreboard_filtered.csv")
+
+        total = len(filtered_df)
         correct = 0
-        for _, row in scoreboard_df.iterrows():
+        for _, row in filtered_df.iterrows():
             try:
                 history = yf.Ticker(row['Ticker']).history(start=row['Date'], end=(pd.to_datetime(row['Date']) + timedelta(days=5)).strftime('%Y-%m-%d'))
                 initial_price = float(row['Price at Scan'])
@@ -194,6 +197,6 @@ with tab3:
                 continue
         if total > 0:
             winrate = round((correct / total) * 100, 2)
-            st.metric("3-Day Win Rate (target +3%)", f"{winrate}%")
+            st.metric("Filtered 3-Day Win Rate (+3%)", f"{winrate}%")
     else:
         st.info("No AI predictions logged yet. Run a scan to begin tracking.")
