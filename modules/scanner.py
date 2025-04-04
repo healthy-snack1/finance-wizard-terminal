@@ -1,10 +1,11 @@
+
 # Swing Scanner module
 import streamlit as st
 import pandas as pd
 import yfinance as yf
 import xgboost as xgb
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from modules.entry_logic import calculate_trigger_and_flags, log_entry_analysis
 
 @st.cache_data
 def get_all_us_tickers():
@@ -65,7 +66,20 @@ def scan_stock(ticker, model, filters):
 
         features = pd.DataFrame([[latest['RSI'], latest['MACD'], latest['Signal']]], columns=['RSI', 'MACD', 'Signal'])
         prob = model.predict_proba(features)[0][1]
-        return {"Ticker": ticker, "Price": round(price, 2), "RSI": round(latest['RSI'], 2), "Confidence": round(prob * 100, 2)}
+
+        avg_volume = df['Volume'][-20:].mean()
+        trigger_price, entry_valid, reasons = calculate_trigger_and_flags(latest, df, avg_volume)
+        log_entry_analysis(ticker, trigger_price, entry_valid, reasons, prob * 100)
+
+        return {
+            "Ticker": ticker,
+            "Price": round(price, 2),
+            "RSI": round(latest['RSI'], 2),
+            "Confidence": round(prob * 100, 2),
+            "Entry Trigger": trigger_price,
+            "Entry Valid": entry_valid,
+            "Entry Reasons": reasons
+        }
     except:
         return None
 
