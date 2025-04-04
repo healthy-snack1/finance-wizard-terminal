@@ -1,0 +1,6 @@
+git init
+git add .
+git commit -m "🚀 Initial modular version"
+git branch -M main
+git remote add origin https://github.com/healthy-snack1/finance-wizard-terminal
+git push -u origin main
