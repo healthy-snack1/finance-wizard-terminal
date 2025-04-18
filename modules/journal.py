@@ -44,7 +44,7 @@ def run_journal():
                 "Hold Days": "",
                 "Status": "Open"
             }
-            df = df.append(new_entry, ignore_index=True)
+            df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
             df.to_csv(LOG_PATH, index=False)
             st.success(f"Trade for {ticker} added.")
 
