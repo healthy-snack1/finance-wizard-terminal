@@ -18,6 +18,11 @@ def get_all_us_tickers():
         return [t for t in tickers if t.isalpha()]
     except:
         return ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD']
+
+@st.cache_data
+def get_price_data(ticker):
+    return yf.Ticker(ticker).history(period="6mo")
+
 def calculate_indicators(df):
     df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
@@ -25,13 +30,22 @@ def calculate_indicators(df):
     return df
 
 def train_model():
-    tickers = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'ROKU']
+    import random
+    base_tickers = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'ROKU', 'AMD', 'GOOGL', 'META', 'NFLX', 'SHOP',
+                    'BIDU', 'INTC', 'QCOM', 'CRM', 'ADBE', 'SQ', 'PYPL', 'ZM', 'UBER', 'DOCU',
+                    'PLTR', 'COIN', 'MRNA', 'CRWD', 'SNOW', 'TTD', 'ASML', 'ENPH', 'PANW', 'BILL']
+    sample_tickers = random.sample(base_tickers, k=10)
     data = []
-    for t in tickers:
-        df = get_price_data(t)
-        df = calculate_indicators(df)
-        df['Target'] = (df['Close'].shift(-3) > df['Close']).astype(int)
-        data.append(df[['Close', 'EMA20', 'EMA50', 'Volume', 'VolumeAvg20', 'Target']])
+    for t in sample_tickers:
+        try:
+            df = get_price_data(t)
+            df = calculate_indicators(df)
+            df['Target'] = (df['Close'].shift(-3) > df['Close']).astype(int)
+            data.append(df[['Close', 'EMA20', 'EMA50', 'Volume', 'VolumeAvg20', 'Target']])
+        except:
+            continue
+    if not data:
+        raise Exception("Model training failed: No valid data.")
     all_data = pd.concat(data).dropna()
     X = all_data[['Close', 'EMA20', 'EMA50', 'Volume', 'VolumeAvg20']]
     y = all_data['Target']
@@ -48,16 +62,13 @@ def analyze_stock(ticker, model):
         ema20 = latest['EMA20']
         ema50 = latest['EMA50']
 
-        # Trend condition
         if not (price > ema20 > ema50):
             return None
 
-        # Pullback condition
         recent_high = df['Close'].rolling(5).max().iloc[-2]
         if price > recent_high:
-            return None  # avoid extended names
+            return None
 
-        # Relative volume
         if latest['Volume'] < 1.3 * latest['VolumeAvg20']:
             return None
 
