@@ -5,6 +5,7 @@ import yfinance as yf
 from datetime import datetime
 import xgboost as xgb
 from concurrent.futures import ThreadPoolExecutor
+from modules.entry_trigger import get_entry_trigger
 
 @st.cache_data
 def get_all_us_tickers():
@@ -64,12 +65,15 @@ def analyze_stock(ticker, model):
         ]], columns=['Close', 'EMA20', 'EMA50', 'Volume', 'VolumeAvg20'])
 
         prob = model.predict_proba(features)[0][1]
+        trigger_info = get_entry_trigger(ticker)
+
         return {
             'Ticker': ticker,
             'Price': round(price, 2),
             'Trend': 'Uptrend',
             'Rel Volume': round(latest['Volume'] / latest['VolumeAvg20'], 2),
-            'Confidence': round(prob * 100, 2)
+            'Confidence': round(prob * 100, 2),
+            'Trigger': trigger_info
         }
     except:
         return None
@@ -89,7 +93,13 @@ def run_scanner():
                 results.append(result)
 
     if results:
-        df = pd.DataFrame(results).sort_values("Confidence", ascending=False)
-        st.dataframe(df, use_container_width=True)
+        results.sort(key=lambda x: x['Confidence'], reverse=True)
+        for res in results:
+            with st.expander(f"{res['Ticker']} | Confidence: {res['Confidence']}% | Trend: {res['Trend']}"):
+                st.write(f"**Current Price:** ${res['Price']}")
+                st.write(f"**Relative Volume:** {res['Rel Volume']}x")
+                if res['Trigger']:
+                    for k, v in res['Trigger'].items():
+                        st.write(f"**{k}:** {v}")
     else:
         st.warning("No ARK-style setups found today.")
