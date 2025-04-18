@@ -1,38 +1,42 @@
 
-import pandas as pd
-import numpy as np
-from datetime import datetime
 import os
+import pandas as pd
+from datetime import datetime
 
-def calculate_trigger_and_flags(latest, df, avg_volume=None):
-    trigger_price = round(latest['Close'] * 1.01, 2)
-    entry_valid = False
+def calculate_trigger_and_flags(latest, df, avg_volume):
+    price = latest['Close']
+    trigger_price = round(price * 1.01, 2)  # default trigger 1% above current close
     reasons = []
 
     if latest['Close'] > latest['EMA20']:
-        entry_valid = True
-        reasons.append("Close > EMA20")
-
+        reasons.append("Price > EMA20")
     if latest['MACD'] > latest['Signal']:
         reasons.append("MACD crossover")
-
     if latest['RSI'] > 60:
         reasons.append("RSI > 60")
+    if latest['Volume'] > avg_volume:
+        reasons.append("Volume Surge")
 
-    if avg_volume and latest['Volume'] >= 1.5 * avg_volume:
-        reasons.append("Volume surge")
-
+    entry_valid = len(reasons) >= 2
     return trigger_price, entry_valid, ", ".join(reasons)
 
-def log_entry_analysis(ticker, trigger_price, entry_valid, reasons, confidence, log_file='data/entry_log.csv'):
-    now = datetime.now().strftime("%Y-%m-%d")
-    row = [now, ticker, trigger_price, entry_valid, reasons, confidence]
-    columns = ["Date", "Ticker", "Trigger Price", "Entry Valid", "Reasons", "Confidence"]
+def log_entry_analysis(ticker, trigger_price, entry_valid, reasons, confidence):
+    path = "data/entry_log.csv"
+    date = datetime.now().strftime("%Y-%m-%d")
 
-    if os.path.exists(log_file):
-        df = pd.read_csv(log_file)
+    entry = {
+        "Date": date,
+        "Ticker": ticker,
+        "Trigger Price": trigger_price,
+        "Entry Valid": entry_valid,
+        "Reasons": reasons,
+        "Confidence": confidence
+    }
+
+    if os.path.exists(path):
+        df = pd.read_csv(path)
     else:
-        df = pd.DataFrame(columns=columns)
+        df = pd.DataFrame(columns=list(entry.keys()))
 
-    df.loc[len(df)] = row
-    df.to_csv(log_file, index=False)
+    df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
+    df.to_csv(path, index=False)

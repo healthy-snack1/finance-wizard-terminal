@@ -110,3 +110,25 @@ def run_scanner():
             st.dataframe(df)
         else:
             st.warning("No setups found.")
+
+def log_entry_analysis(ticker, trigger_price, entry_valid, reasons, confidence):
+    path = "data/entry_log.csv"
+    date = datetime.now().strftime("%Y-%m-%d")
+
+    entry = {
+        "Date": date,
+        "Ticker": ticker,
+        "Trigger Price": trigger_price,
+        "Entry Valid": entry_valid,
+        "Reasons": reasons,
+        "Confidence": confidence
+    }
+
+    if os.path.exists(path):
+        df = pd.read_csv(path)
+    else:
+        df = pd.DataFrame(columns=list(entry.keys()))
+
+    df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
+    df.to_csv(path, index=False)
+
