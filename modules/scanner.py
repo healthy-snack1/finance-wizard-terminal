@@ -9,14 +9,15 @@ from modules.entry_trigger import get_entry_trigger
 
 @st.cache_data
 def get_all_us_tickers():
-    url = "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv"
-    df = pd.read_csv(url)
-    return df['Symbol'].tolist()
-
-@st.cache_data
-def get_price_data(ticker):
-    return yf.Ticker(ticker).history(period="6mo")
-
+    try:
+        nasdaq_url = "https://old.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
+        other_url = "https://old.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
+        nasdaq = pd.read_csv(nasdaq_url, sep="|")
+        other = pd.read_csv(other_url, sep="|")
+        tickers = pd.concat([nasdaq["Symbol"], other["ACT Symbol"]]).dropna().unique().tolist()
+        return [t for t in tickers if t.isalpha()]
+    except:
+        return ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMD']
 def calculate_indicators(df):
     df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
